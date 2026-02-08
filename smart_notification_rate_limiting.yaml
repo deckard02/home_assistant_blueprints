@@ -1,0 +1,166 @@
+# Advanced Notification Blueprint with Rate Limiting
+blueprint:
+  name: Smart Notification with Rate Limiting
+  description: |
+    Send notifications (TTS or mobile) with intelligent rate limiting,
+    dismissal toggle, and time restrictions. Perfect for alerts that
+    shouldn't spam but need periodic reminders.
+  domain: automation
+  input:
+    trigger_entity:
+      name: Trigger Entity
+      description: Entity that triggers the notification
+      selector:
+        entity: {}
+
+    trigger_from_state:
+      name: From State
+      description: State to trigger from (leave empty for any)
+      default: ""
+      selector:
+        text:
+
+    trigger_to_state:
+      name: To State
+      description: State to trigger to
+      selector:
+        text:
+
+    trigger_duration:
+      name: Trigger Duration
+      description: How long entity must be in state before first notification
+      default:
+        hours: 0
+        minutes: 1
+        seconds: 0
+      selector:
+        duration:
+
+    repeat_interval:
+      name: Repeat Interval
+      description: Time between repeated notifications
+      default:
+        hours: 0
+        minutes: 3
+        seconds: 0
+      selector:
+        duration:
+
+    dismissal_toggle:
+      name: Dismissal Toggle
+      description: Input boolean to dismiss/snooze notifications
+      selector:
+        entity:
+          domain: input_boolean
+
+    time_start:
+      name: Start Time
+      description: Don't send notifications before this time
+      default: "07:00:00"
+      selector:
+        time:
+
+    time_end:
+      name: End Time
+      description: Don't send notifications after this time
+      default: "22:00:00"
+      selector:
+        time:
+
+    notification_title:
+      name: Notification Title
+      description: Title for the notification
+      selector:
+        text:
+
+    notification_message:
+      name: Notification Message
+      description: Message content (can use templates)
+      selector:
+        text:
+          multiline: true
+
+    mobile_notify_service:
+      name: Mobile Notify Service
+      description: Mobile notification service (e.g. notify.mobile_app_phone_name)
+      default: ""
+      selector:
+        text:
+
+    tts_target:
+      name: TTS Target (Optional)
+      description: Media player for TTS announcements
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+
+    tts_message:
+      name: TTS Message
+      description: Text-to-speech message (leave empty to use notification message)
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+variables:
+  trigger_entity: !input trigger_entity
+  dismissal_toggle: !input dismissal_toggle
+  mobile_service: !input mobile_notify_service
+  tts_targets: !input tts_target
+  tts_msg: !input tts_message
+  notif_msg: !input notification_message
+
+trigger:
+  - platform: state
+    entity_id: !input trigger_entity
+    from: !input trigger_from_state
+    to: !input trigger_to_state
+    for: !input trigger_duration
+
+condition:
+  - condition: time
+    after: !input time_start
+    before: !input time_end
+  - condition: state
+    entity_id: !input dismissal_toggle
+    state: "off"
+
+action:
+  - repeat:
+      while:
+        - condition: state
+          entity_id: !input trigger_entity
+          state: !input trigger_to_state
+        - condition: state
+          entity_id: !input dismissal_toggle
+          state: "off"
+        - condition: time
+          after: !input time_start
+          before: !input time_end
+      sequence:
+        # Send mobile notification
+        - if:
+            - condition: template
+              value_template: "{{ mobile_service != '' }}"
+          then:
+            - service: "{{ mobile_service }}"
+              data:
+                title: !input notification_title
+                message: "{{ notif_msg }}"
+
+        # Send TTS notification
+        - if:
+            - condition: template
+              value_template: "{{ tts_targets | length > 0 }}"
+          then:
+            - service: tts.cloud_say
+              data:
+                entity_id: "{{ tts_targets }}"
+                message: "{{ tts_msg if tts_msg != '' else notif_msg }}"
+
+        # Wait for repeat interval
+        - delay: !input repeat_interval
+
+mode: restart
