@@ -1,0 +1,102 @@
+blueprint:
+  name: Lux-Based Light Control with Shutdown
+  description: Turn on lights or switches when lux levels are low and turn off when house shutdown is activated
+  domain: automation
+  input:
+    target_entities:
+      name: Lights or Switches
+      description: The lights or switches to control (can select multiple)
+      selector:
+        target:
+          entity:
+            domain:
+              - light
+              - switch
+    outside_lux_sensor:
+      name: Outside Lux Sensor
+      description: The outdoor light sensor to monitor
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    outside_lux_threshold:
+      name: Outside Lux Threshold
+      description: Turn on lights when outside lux is below this value
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: "lx"
+    use_inside_lux:
+      name: Use Inside Lux Sensor
+      description: Enable indoor lux sensor as additional condition
+      default: false
+      selector:
+        boolean:
+    inside_lux_sensor:
+      name: Inside Lux Sensor (Optional)
+      description: The indoor light sensor to monitor
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    inside_lux_threshold:
+      name: Inside Lux Threshold
+      description: Turn on lights when inside lux is below this value (only if enabled)
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: "lx"
+    shutdown_toggle:
+      name: House Shutdown Toggle
+      description: Boolean input that turns off all lights when activated
+      selector:
+        entity:
+          domain: input_boolean
+
+trigger:
+  - platform: numeric_state
+    entity_id: !input outside_lux_sensor
+    below: !input outside_lux_threshold
+    id: lux_low
+  - platform: numeric_state
+    entity_id: !input outside_lux_sensor
+    above: !input outside_lux_threshold
+    id: lux_high
+  - platform: state
+    entity_id: !input shutdown_toggle
+    to: "on"
+    id: shutdown_active
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: lux_low
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ use_inside_lux }}"
+                sequence:
+                  - condition: numeric_state
+                    entity_id: !input inside_lux_sensor
+                    below: !input inside_lux_threshold
+          - service: homeassistant.turn_on
+            target: !input target_entities
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: lux_high
+              - condition: trigger
+                id: shutdown_active
+        sequence:
+          - service: homeassistant.turn_off
+            target: !input target_entities
+
+mode: restart
