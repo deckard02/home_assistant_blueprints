@@ -1,0 +1,86 @@
+blueprint:
+  name: Entertainment Room Light Control
+  description: Automatically dim lights when media starts playing and restore brightness when media stops or pauses
+  domain: automation
+  input:
+    media_player:
+      name: Media Player
+      description: The media player to monitor
+      selector:
+        entity:
+          domain: media_player
+    light_entities:
+      name: Light Entities
+      description: The lights to control (can select multiple)
+      selector:
+        target:
+          entity:
+            domain: light
+    playing_brightness:
+      name: Playing Brightness
+      description: Brightness level when media is playing
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    stopped_brightness:
+      name: Stopped/Paused Brightness
+      description: Brightness level when media is stopped or paused
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    transition_time:
+      name: Transition Time
+      description: Time in seconds for the light transition
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: "seconds"
+
+trigger:
+  - platform: state
+    entity_id: !input media_player
+    to: "playing"
+    id: media_playing
+  - platform: state
+    entity_id: !input media_player
+    to: "paused"
+    id: media_paused
+  - platform: state
+    entity_id: !input media_player
+    to: "idle"
+    id: media_stopped
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: media_playing
+        sequence:
+          - service: light.turn_on
+            target: !input light_entities
+            data:
+              brightness_pct: !input playing_brightness
+              transition: !input transition_time
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: media_paused
+              - condition: trigger
+                id: media_stopped
+        sequence:
+          - service: light.turn_on
+            target: !input light_entities
+            data:
+              brightness_pct: !input stopped_brightness
+              transition: !input transition_time
+
+mode: restart
