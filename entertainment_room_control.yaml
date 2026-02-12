@@ -58,6 +58,12 @@ trigger:
     to: "idle"
     id: media_stopped
 
+condition:
+  - condition: template
+    value_template: >
+      {{ expand(light_entities.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+    alias: At least one light is on
+
 action:
   - choose:
       - conditions:
