@@ -1,0 +1,102 @@
+blueprint:
+  name: Motion-Activated Lights with Lux Control
+  description: Turn on lights or switches based on motion when lux levels are low, with automatic timeout
+  domain: automation
+  input:
+    motion_sensor:
+      name: Motion Sensor
+      description: The motion sensor to monitor
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    target_entities:
+      name: Lights or Switches
+      description: The lights or switches to control (can select multiple)
+      selector:
+        target:
+          entity:
+            domain:
+              - light
+              - switch
+    outside_lux_sensor:
+      name: Outside Lux Sensor
+      description: The outdoor light sensor to monitor
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    outside_lux_threshold:
+      name: Outside Lux Threshold
+      description: Turn on lights when outside lux is below this value
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: "lx"
+    use_inside_lux:
+      name: Use Inside Lux Sensor
+      description: Enable indoor lux sensor as additional condition
+      default: false
+      selector:
+        boolean:
+    inside_lux_sensor:
+      name: Inside Lux Sensor (Optional)
+      description: The indoor light sensor to monitor
+      default: {}
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    inside_lux_threshold:
+      name: Inside Lux Threshold
+      description: Turn on lights when inside lux is below this value (only if enabled)
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: "lx"
+    timeout_duration:
+      name: Timeout Duration
+      description: Time to wait after last motion before turning off
+      default: 300
+      selector:
+        number:
+          min: 10
+          max: 3600
+          unit_of_measurement: "seconds"
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+    id: motion_detected
+
+condition:
+  - condition: numeric_state
+    entity_id: !input outside_lux_sensor
+    below: !input outside_lux_threshold
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ use_inside_lux }}"
+        sequence:
+          - condition: numeric_state
+            entity_id: !input inside_lux_sensor
+            below: !input inside_lux_threshold
+  - service: homeassistant.turn_on
+    target: !input target_entities
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input motion_sensor
+        to: "off"
+        for: !input timeout_duration
+    continue_on_timeout: false
+  - service: homeassistant.turn_off
+    target: !input target_entities
+
+mode: restart
