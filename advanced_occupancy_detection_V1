@@ -1,0 +1,122 @@
+blueprint:
+  name: Advanced Occupancy Detection
+  description: Detects occupancy using motion, presence, contact, and vibration sensors with dynamic timeouts
+  domain: automation
+  input:
+    occupancy_helper:
+      name: Occupancy Helper
+      description: Input boolean to track occupancy state
+      selector:
+        entity:
+          domain: input_boolean
+    
+    motion_sensors:
+      name: Motion/Presence Sensors
+      description: Indoor motion or presence sensors
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: 
+            - motion
+            - occupancy
+            - presence
+          multiple: true
+    
+    contact_sensors:
+      name: Contact Sensors
+      description: Window contact sensors (opening indicates activity)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: contact
+          multiple: true
+    
+    vibration_sensors:
+      name: Vibration Sensors
+      description: Vibration sensors for activity detection
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: vibration
+          multiple: true
+    
+    exterior_doors:
+      name: Exterior Door Sensors
+      description: Exterior door contact sensors (reduce timeout when opened)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+          multiple: true
+    
+    night_start_time:
+      name: Night Mode Start Time
+      description: Time when night mode begins (extended timeout)
+      default: "21:00:00"
+      selector:
+        time: {}
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  occupancy_entity: !input occupancy_helper
+  night_time: !input night_start_time
+  current_time: "{{ now().strftime('%H:%M:%S') }}"
+  is_night: "{{ current_time >= night_time or current_time < '06:00:00' }}"
+  
+trigger:
+  - platform: state
+    entity_id: !input motion_sensors
+    to: 'on'
+    id: motion_detected
+  
+  - platform: state
+    entity_id: !input contact_sensors
+    to: 'on'
+    id: window_opened
+  
+  - platform: state
+    entity_id: !input vibration_sensors
+    to: 'on'
+    id: vibration_detected
+  
+  - platform: state
+    entity_id: !input exterior_doors
+    to: 'on'
+    id: exterior_door_opened
+
+action:
+  - service: input_boolean.turn_on
+    target:
+      entity_id: !input occupancy_helper
+  
+  - choose:
+      # Exterior door opened - 10 minute timeout
+      - conditions:
+          - condition: trigger
+            id: exterior_door_opened
+        sequence:
+          - delay:
+              minutes: 10
+      
+      # Activity after night start time - 8 hour timeout
+      - conditions:
+          - condition: template
+            value_template: "{{ is_night }}"
+        sequence:
+          - delay:
+              hours: 8
+    
+    # Default - 30 minute timeout
+    default:
+      - delay:
+          minutes: 30
+  
+  - service: input_boolean.turn_off
+    target:
+      entity_id: !input occupancy_helper
