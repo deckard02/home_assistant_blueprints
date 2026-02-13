@@ -1,0 +1,417 @@
+blueprint:
+  name: Advanced Occupancy Detection v2
+  description: Enhanced occupancy detection with direction tracking, sensor-specific timeouts, override modes, and media integration
+  domain: automation
+  input:
+    occupancy_helper:
+      name: Occupancy Helper
+      description: Input boolean to track occupancy state
+      selector:
+        entity:
+          domain: input_boolean
+    
+    # Sensor Categories
+    presence_sensors:
+      name: Presence Sensors (mmWave/Radar)
+      description: Stationary presence detection sensors (prioritized)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: 
+            - occupancy
+            - presence
+          multiple: true
+    
+    motion_sensors:
+      name: Motion Sensors (PIR)
+      description: Traditional motion sensors
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: true
+    
+    contact_sensors:
+      name: Contact Sensors (Windows)
+      description: Window contact sensors
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: contact
+          multiple: true
+    
+    vibration_sensors:
+      name: Vibration Sensors
+      description: Furniture/equipment vibration sensors (indicates sitting/working)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: vibration
+          multiple: true
+    
+    # Door Direction Detection
+    exterior_doors:
+      name: Exterior Door Sensors
+      description: Exterior door contact sensors
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+          multiple: true
+    
+    door_inside_motion:
+      name: Interior Motion Sensor Near Door
+      description: Motion sensor just inside exterior door for direction detection
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: true
+    
+    # Media Integration
+    media_players:
+      name: Media Players
+      description: TV, music players, etc. (extends timeout when playing)
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+    
+    # Override Modes
+    guest_mode:
+      name: Guest Mode
+      description: Input boolean for guest mode (longer timeouts)
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+    
+    away_mode:
+      name: Away Mode
+      description: Input boolean for away mode (stricter detection)
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+    
+    sleep_mode:
+      name: Sleep Mode
+      description: Input boolean for sleep mode (very long timeouts)
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+    
+    # Timeout Settings
+    presence_timeout:
+      name: Presence Sensor Timeout
+      description: Timeout after presence sensor activity (minutes)
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 240
+          unit_of_measurement: minutes
+    
+    motion_timeout:
+      name: Motion Sensor Timeout
+      description: Timeout after motion detection (minutes)
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          unit_of_measurement: minutes
+    
+    vibration_timeout:
+      name: Vibration Sensor Timeout
+      description: Timeout after vibration (sitting/working) (minutes)
+      default: 90
+      selector:
+        number:
+          min: 10
+          max: 240
+          unit_of_measurement: minutes
+    
+    contact_timeout:
+      name: Contact Sensor Timeout
+      description: Timeout after window opening (minutes)
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 60
+          unit_of_measurement: minutes
+    
+    media_active_timeout:
+      name: Media Playing Timeout
+      description: Timeout while media is playing (minutes)
+      default: 120
+      selector:
+        number:
+          min: 30
+          max: 480
+          unit_of_measurement: minutes
+    
+    exterior_door_entry_timeout:
+      name: Door Entry Timeout
+      description: Timeout when entering through door (minutes)
+      default: 45
+      selector:
+        number:
+          min: 5
+          max: 120
+          unit_of_measurement: minutes
+    
+    exterior_door_exit_timeout:
+      name: Door Exit Timeout
+      description: Timeout when exiting through door (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          unit_of_measurement: minutes
+    
+    night_start_time:
+      name: Night Mode Start Time
+      description: Time when night mode begins
+      default: "21:00:00"
+      selector:
+        time: {}
+    
+    night_timeout_multiplier:
+      name: Night Timeout Multiplier
+      description: Multiply timeout by this factor during night hours
+      default: 8
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 0.5
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  occupancy_entity: !input occupancy_helper
+  night_time: !input night_start_time
+  current_time: "{{ now().strftime('%H:%M:%S') }}"
+  is_night: "{{ current_time >= night_time or current_time < '06:00:00' }}"
+  
+  # Mode checks
+  guest_mode_entity: !input guest_mode
+  away_mode_entity: !input away_mode
+  sleep_mode_entity: !input sleep_mode
+  is_guest_mode: "{{ guest_mode_entity != [] and is_state(guest_mode_entity, 'on') }}"
+  is_away_mode: "{{ away_mode_entity != [] and is_state(away_mode_entity, 'on') }}"
+  is_sleep_mode: "{{ sleep_mode_entity != [] and is_state(sleep_mode_entity, 'on') }}"
+  
+  # Timeout values
+  base_presence_timeout: !input presence_timeout
+  base_motion_timeout: !input motion_timeout
+  base_vibration_timeout: !input vibration_timeout
+  base_contact_timeout: !input contact_timeout
+  base_media_timeout: !input media_active_timeout
+  base_door_entry_timeout: !input exterior_door_entry_timeout
+  base_door_exit_timeout: !input exterior_door_exit_timeout
+  night_multiplier: !input night_timeout_multiplier
+  
+  # Media player check
+  media_entities: !input media_players
+  media_playing: "{{ media_entities | select('is_state', 'playing') | list | count > 0 }}"
+
+trigger:
+  - platform: state
+    entity_id: !input presence_sensors
+    to: 'on'
+    id: presence_detected
+  
+  - platform: state
+    entity_id: !input motion_sensors
+    to: 'on'
+    id: motion_detected
+  
+  - platform: state
+    entity_id: !input contact_sensors
+    to: 'on'
+    id: window_opened
+  
+  - platform: state
+    entity_id: !input vibration_sensors
+    to: 'on'
+    id: vibration_detected
+  
+  - platform: state
+    entity_id: !input exterior_doors
+    to: 'on'
+    id: exterior_door_opened
+  
+  - platform: state
+    entity_id: !input media_players
+    to: 'playing'
+    id: media_started
+
+action:
+  - service: input_boolean.turn_on
+    target:
+      entity_id: !input occupancy_helper
+  
+  - choose:
+      # Sleep Mode - very long timeout regardless of trigger
+      - conditions:
+          - condition: template
+            value_template: "{{ is_sleep_mode }}"
+        sequence:
+          - delay:
+              hours: 12
+      
+      # Media Playing - extended timeout
+      - conditions:
+          - condition: trigger
+            id: media_started
+        sequence:
+          - delay:
+              minutes: >
+                {% set timeout = base_media_timeout %}
+                {% if is_night %}
+                  {{ timeout * night_multiplier }}
+                {% elif is_guest_mode %}
+                  {{ timeout * 1.5 }}
+                {% else %}
+                  {{ timeout }}
+                {% endif %}
+      
+      # Presence Sensor (mmWave/Radar) - longest timeout
+      - conditions:
+          - condition: trigger
+            id: presence_detected
+        sequence:
+          - delay:
+              minutes: >
+                {% set timeout = base_presence_timeout %}
+                {% if is_night %}
+                  {{ timeout * night_multiplier }}
+                {% elif is_guest_mode %}
+                  {{ timeout * 1.5 }}
+                {% else %}
+                  {{ timeout }}
+                {% endif %}
+      
+      # Vibration Sensor - long timeout (sitting/working)
+      - conditions:
+          - condition: trigger
+            id: vibration_detected
+        sequence:
+          - delay:
+              minutes: >
+                {% set timeout = base_vibration_timeout %}
+                {% if is_night %}
+                  {{ timeout * night_multiplier }}
+                {% elif is_guest_mode %}
+                  {{ timeout * 1.5 }}
+                {% else %}
+                  {{ timeout }}
+                {% endif %}
+      
+      # Exterior Door with Direction Detection
+      - conditions:
+          - condition: trigger
+            id: exterior_door_opened
+        sequence:
+          # Wait briefly to detect direction
+          - delay:
+              seconds: 3
+          
+          # Check if interior motion detected (entering) or not (exiting)
+          - choose:
+              # Entering - motion detected inside
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {% set door_motion = state_attr('automation.' ~ this.entity_id, 'door_inside_motion') %}
+                      {{ door_motion | select('is_state', 'on') | list | count > 0 }}
+                sequence:
+                  - delay:
+                      minutes: >
+                        {% set timeout = base_door_entry_timeout %}
+                        {% if is_night %}
+                          {{ timeout * night_multiplier }}
+                        {% elif is_guest_mode %}
+                          {{ timeout * 1.5 }}
+                        {% else %}
+                          {{ timeout }}
+                        {% endif %}
+            
+            # Exiting - no motion inside, short timeout
+            default:
+              - delay:
+                  minutes: "{{ base_door_exit_timeout }}"
+      
+      # Window Contact - short timeout
+      - conditions:
+          - condition: trigger
+            id: window_opened
+        sequence:
+          - delay:
+              minutes: >
+                {% set timeout = base_contact_timeout %}
+                {% if is_night %}
+                  {{ timeout * night_multiplier }}
+                {% elif is_guest_mode %}
+                  {{ timeout * 1.5 }}
+                {% else %}
+                  {{ timeout }}
+                {% endif %}
+      
+      # Motion Sensor (PIR) - standard timeout
+      - conditions:
+          - condition: trigger
+            id: motion_detected
+        sequence:
+          # Away mode requires multiple confirmations
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ is_away_mode }}"
+                sequence:
+                  - delay:
+                      minutes: 2
+                  # Check if still detecting motion
+                  - condition: template
+                    value_template: >
+                      {{ expand(state_attr('automation.' ~ this.entity_id, 'motion_sensors')) 
+                         | selectattr('state', 'eq', 'on') | list | count > 0 }}
+          
+          - delay:
+              minutes: >
+                {% set timeout = base_motion_timeout %}
+                {% if is_night %}
+                  {% if media_playing %}
+                    {{ base_media_timeout * night_multiplier }}
+                  {% else %}
+                    {{ timeout * night_multiplier }}
+                  {% endif %}
+                {% elif is_guest_mode %}
+                  {{ timeout * 1.5 }}
+                {% elif media_playing %}
+                  {{ base_media_timeout }}
+                {% else %}
+                  {{ timeout }}
+                {% endif %}
+    
+    # Fallback default
+    default:
+      - delay:
+          minutes: 30
+  
+  - service: input_boolean.turn_off
+    target:
+      entity_id: !input occupancy_helper
