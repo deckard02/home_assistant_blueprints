@@ -1,0 +1,122 @@
+blueprint:
+  name: Device Offline Notification with Confirmation
+  description: >
+    Send a notification when a device goes offline and require confirmation 
+    that the notification was read. Optionally send a reminder if not confirmed.
+  domain: automation
+  
+  input:
+    target_device:
+      name: Device to Monitor
+      description: The device to monitor for offline status
+      selector:
+        device:
+    
+    notification_service:
+      name: Notification Service
+      description: The mobile app notification service (e.g., notify.mobile_app_iphone)
+      selector:
+        text:
+      default: notify.mobile_app
+    
+    time_offline:
+      name: Time Offline Before Alert
+      description: How long the device must be offline before sending notification
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          unit_of_measurement: minutes
+    
+    reminder_enabled:
+      name: Send Reminder
+      description: Send a reminder if notification is not confirmed
+      default: true
+      selector:
+        boolean:
+    
+    reminder_delay:
+      name: Reminder Delay
+      description: How long to wait before sending a reminder
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          unit_of_measurement: minutes
+
+trigger:
+  - platform: device
+    domain: binary_sensor
+    device_id: !input target_device
+    type: connectivity
+    to: "off"
+    for:
+      minutes: !input time_offline
+
+condition: []
+
+action:
+  - variables:
+      device_name: >
+        {{ device_attr(trigger.device_id, 'name') }}
+      notification_id: "device_offline_{{ trigger.device_id | replace('-', '_') }}"
+      
+  - service: !input notification_service
+    data:
+      title: "Device Offline Alert"
+      message: "{{ device_name }} has been offline for {{ trigger.for.minutes }} minutes"
+      data:
+        tag: "{{ notification_id }}"
+        actions:
+          - action: "CONFIRM_READ_{{ trigger.device_id | replace('-', '_') }}"
+            title: "I've Read This"
+        notification_icon: "mdi:alert-circle"
+        importance: high
+        
+  - if:
+      - condition: template
+        value_template: !input reminder_enabled
+    then:
+      - wait_for_trigger:
+          - platform: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "CONFIRM_READ_{{ trigger.device_id | replace('-', '_') }}"
+        timeout:
+          minutes: !input reminder_delay
+        continue_on_timeout: true
+        
+      - if:
+          - condition: template
+            value_template: "{{ wait.trigger == none }}"
+        then:
+          - service: !input notification_service
+            data:
+              title: "Reminder: Device Still Offline"
+              message: "{{ device_name }} is still offline. Please check the device."
+              data:
+                tag: "{{ notification_id }}_reminder"
+                actions:
+                  - action: "CONFIRM_READ_{{ trigger.device_id | replace('-', '_') }}"
+                    title: "I've Read This"
+                notification_icon: "mdi:alert-circle"
+                importance: high
+  
+  - wait_for_trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "CONFIRM_READ_{{ trigger.device_id | replace('-', '_') }}"
+    timeout:
+      hours: 24
+    continue_on_timeout: true
+    
+  - service: !input notification_service
+    data:
+      message: clear_notification
+      data:
+        tag: "{{ notification_id }}"
+
+mode: single
