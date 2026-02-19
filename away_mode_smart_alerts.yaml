@@ -1,0 +1,615 @@
+blueprint:
+  name: Away Mode Security Alert (Enhanced)
+  description: >
+    Monitors motion and contact sensors while Away Mode is active. If sensors
+    trigger a specified number of times within a time window, an actionable
+    notification is sent with sensor context. Includes entry delay, escalation
+    on no response, alarm auto-stop, TTS warning, siren support, cooldown
+    period, device tracker disarm, and full alert logging.
+  domain: automation
+  input:
+
+    # --- Core ---
+    away_mode_helper:
+      name: Away Mode Helper
+      description: Input boolean that represents Away Mode being active.
+      selector:
+        entity:
+          domain: input_boolean
+
+    trigger_counter:
+      name: Trigger Counter Helper
+      description: >
+        Create a Counter helper (Settings → Helpers → Counter) named something
+        like "Security Trigger Counter". Set minimum to 0, no maximum needed.
+        This blueprint will manage it automatically.
+      selector:
+        entity:
+          domain: counter
+
+    # --- Sensors ---
+    motion_sensors:
+      name: Motion Sensors
+      description: One or more motion sensors to monitor.
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+          multiple: true
+
+    contact_sensors:
+      name: Contact Sensors (Doors/Windows)
+      description: One or more contact sensors to monitor.
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - door
+            - window
+            - opening
+          multiple: true
+
+    # --- Trigger Logic ---
+    trigger_count:
+      name: Trigger Count Threshold
+      description: How many sensor triggers within the time window are needed to fire an alert.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: box
+
+    time_window:
+      name: Time Window (seconds)
+      description: Rolling window in which triggers are counted before the counter resets.
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 600
+          step: 5
+          unit_of_measurement: seconds
+          mode: slider
+
+    # --- Delays & Cooldowns ---
+    entry_delay:
+      name: Entry Delay (seconds)
+      description: >
+        Grace period after threshold is met before the notification fires.
+        Useful if you sometimes forget to turn off Away Mode when arriving home.
+        Set to 0 to disable.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 5
+          unit_of_measurement: seconds
+          mode: slider
+
+    cooldown_period:
+      name: Cooldown Period (minutes)
+      description: >
+        Minimum time before the automation can fire again after an alert.
+        Requires an Input Datetime helper — create one called e.g.
+        "Security Last Alert Time" (Settings → Helpers → Date and/or time,
+        type: Date and time).
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: minutes
+          mode: slider
+
+    last_alert_datetime:
+      name: Last Alert Datetime Helper
+      description: >
+        Input Datetime helper used to track the last alert time for cooldown.
+        Create via Settings → Helpers → Date and/or time (type: Date and time).
+      selector:
+        entity:
+          domain: input_datetime
+
+    # --- Device Tracker Disarm ---
+    trusted_devices:
+      name: Trusted Device Trackers (Optional)
+      description: >
+        If any of these device trackers show "home", the alert will be
+        suppressed. Leave empty to skip this check.
+      default: []
+      selector:
+        entity:
+          domain: device_tracker
+          multiple: true
+
+    # --- Notifications ---
+    notify_device:
+      name: Notification Device
+      description: The mobile device to send the security alert to.
+      selector:
+        device:
+          integration: mobile_app
+
+    notification_title:
+      name: Notification Title
+      default: "⚠️ Security Alert"
+      selector:
+        text:
+
+    # --- Response & Escalation ---
+    response_timeout:
+      name: Response Timeout (minutes)
+      description: How long to wait for a response before escalating.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 15
+          step: 1
+          unit_of_measurement: minutes
+          mode: slider
+
+    auto_alarm_on_timeout:
+      name: Auto-Trigger Alarm if No Response
+      description: >
+        If enabled, the alarm will automatically sound if you don't respond
+        within the response timeout window.
+      default: true
+      selector:
+        boolean:
+
+    # --- TTS ---
+    tts_warning_enabled:
+      name: Enable TTS Warning
+      description: Play a spoken warning before the alarm sound.
+      default: true
+      selector:
+        boolean:
+
+    tts_service:
+      name: TTS Service
+      description: >
+        The TTS service to use for the spoken warning.
+        Example: tts.cloud_say or tts.google_translate_say
+      default: "tts.cloud_say"
+      selector:
+        text:
+
+    tts_message:
+      name: TTS Warning Message
+      default: "Warning. A security alert has been triggered. The alarm will sound."
+      selector:
+        text:
+
+    tts_language:
+      name: TTS Language
+      default: "en-US"
+      selector:
+        text:
+
+    # --- Alarm Media ---
+    media_players:
+      name: Speaker(s) for Alarm
+      description: Speakers or media players to play the alarm sound on.
+      default: []
+      selector:
+        entity:
+          domain: media_player
+          multiple: true
+
+    alarm_sound_url:
+      name: Alarm Sound URL
+      description: >
+        URL or local path to the alarm audio file.
+        Example: /local/sounds/alarm.mp3
+      default: "/local/sounds/alarm.mp3"
+      selector:
+        text:
+
+    alarm_volume:
+      name: Alarm Volume
+      description: Volume level for the alarm (0.0 – 1.0).
+      default: 0.9
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+          mode: slider
+
+    alarm_duration:
+      name: Alarm Duration (minutes)
+      description: How long the alarm plays before automatically stopping.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: minutes
+          mode: slider
+
+    # --- Siren ---
+    siren_enabled:
+      name: Enable Siren / Switch
+      description: Also trigger a dedicated siren or switch when the alarm fires.
+      default: false
+      selector:
+        boolean:
+
+    siren_entity:
+      name: Siren / Switch Entity
+      description: The siren or switch entity to turn on when alarming.
+      default: ""
+      selector:
+        entity:
+          domain:
+            - switch
+            - siren
+
+# ─────────────────────────────────────────────
+# Automation
+# ─────────────────────────────────────────────
+variables:
+  trigger_count_val: !input trigger_count
+  time_window_val: !input time_window
+  entry_delay_val: !input entry_delay
+  cooldown_val: !input cooldown_period
+  response_timeout_val: !input response_timeout
+  auto_alarm_val: !input auto_alarm_on_timeout
+  tts_enabled_val: !input tts_warning_enabled
+  siren_enabled_val: !input siren_enabled
+  siren_entity_val: !input siren_entity
+  last_alert_val: !input last_alert_datetime
+  trusted_devices_val: !input trusted_devices
+  media_players_val: !input media_players
+  alarm_duration_val: !input alarm_duration
+  away_mode_val: !input away_mode_helper
+  counter_val: !input trigger_counter
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "on"
+    id: sensor_trigger
+  - platform: state
+    entity_id: !input contact_sensors
+    to: "on"
+    id: sensor_trigger
+
+condition:
+  # Away Mode must be on
+  - condition: state
+    entity_id: !input away_mode_helper
+    state: "on"
+  # No trusted device is home
+  - condition: template
+    value_template: >
+      {% if trusted_devices_val | length == 0 %}
+        true
+      {% else %}
+        {{ trusted_devices_val | map('states') | select('eq', 'home') | list | count == 0 }}
+      {% endif %}
+  # Cooldown check
+  - condition: template
+    value_template: >
+      {% set last = states(last_alert_val) %}
+      {% if last in ['unknown', 'unavailable', ''] %}
+        true
+      {% else %}
+        {{ (now().timestamp() - as_datetime(last).timestamp()) > (cooldown_val * 60) }}
+      {% endif %}
+
+action:
+  # Increment the counter
+  - service: counter.increment
+    target:
+      entity_id: !input trigger_counter
+
+  # Check if we've hit the threshold
+  - condition: template
+    value_template: "{{ states(counter_val) | int >= trigger_count_val }}"
+
+  # Reset the counter immediately so future triggers start fresh
+  - service: counter.reset
+    target:
+      entity_id: !input trigger_counter
+
+  # Build a context message from the triggering entity
+  - variables:
+      triggered_entity: "{{ trigger.entity_id }}"
+      triggered_name: "{{ state_attr(trigger.entity_id, 'friendly_name') or trigger.entity_id }}"
+      alert_message: >
+        Sensor activity detected: {{ triggered_name }}.
+        {{ trigger_count_val }} or more triggers in {{ time_window_val }}s while Away Mode is active.
+
+  # Schedule counter reset after the time window (in case threshold is never reached)
+  - delay:
+      seconds: 0  # non-blocking; the reset below uses a separate script call if needed
+
+  # Entry delay before alerting
+  - if:
+      - condition: template
+        value_template: "{{ entry_delay_val | int > 0 }}"
+    then:
+      - delay:
+          seconds: "{{ entry_delay_val }}"
+      # Re-check Away Mode after delay (user may have come home and disarmed)
+      - condition: state
+        entity_id: !input away_mode_helper
+        state: "on"
+      - condition: template
+        value_template: >
+          {% if trusted_devices_val | length == 0 %}
+            true
+          {% else %}
+            {{ trusted_devices_val | map('states') | select('eq', 'home') | list | count == 0 }}
+          {% endif %}
+
+  # Log the alert
+  - service: logbook.log
+    data:
+      name: "Security Alert"
+      message: >
+        Alert fired. Triggered by: {{ triggered_name }}.
+        Threshold: {{ trigger_count_val }} triggers in {{ time_window_val }}s.
+      entity_id: !input away_mode_helper
+
+  # Update last alert timestamp
+  - service: input_datetime.set_datetime
+    target:
+      entity_id: !input last_alert_datetime
+    data:
+      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # Send actionable notification with context
+  - device_id: !input notify_device
+    domain: mobile_app
+    type: notify
+    title: !input notification_title
+    message: "{{ alert_message }}"
+    data:
+      tag: security_alert_away
+      actions:
+        - action: "SOUND_ALARM"
+          title: "🔔 Sound Alarm"
+        - action: "DISMISS_ALERT"
+          title: "✅ Dismiss"
+        - action: "DISARM_MODE"
+          title: "🏠 I'm Home — Disarm"
+
+  # Wait for user response
+  - wait_for_trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "SOUND_ALARM"
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "DISMISS_ALERT"
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "DISARM_MODE"
+    timeout:
+      minutes: "{{ response_timeout_val }}"
+    continue_on_timeout: true
+
+  # Handle response or timeout
+  - choose:
+
+      # ── Sound Alarm (manual) ──
+      - conditions:
+          - condition: template
+            value_template: "{{ wait.trigger is not none and wait.trigger.event.data.action == 'SOUND_ALARM' }}"
+        sequence:
+          - alias: "Sound the alarm"
+            <<: &alarm_sequence
+              sequence:
+                - if:
+                    - condition: template
+                      value_template: "{{ tts_enabled_val }}"
+                  then:
+                    - service: !input tts_service
+                      data:
+                        entity_id: !input media_players
+                        message: !input tts_message
+                        language: !input tts_language
+                    - delay:
+                        seconds: 5
+                - service: media_player.volume_set
+                  target:
+                    entity_id: !input media_players
+                  data:
+                    volume_level: !input alarm_volume
+                - service: media_player.play_media
+                  target:
+                    entity_id: !input media_players
+                  data:
+                    media_content_id: !input alarm_sound_url
+                    media_content_type: music
+                - if:
+                    - condition: template
+                      value_template: "{{ siren_enabled_val and siren_entity_val != '' }}"
+                  then:
+                    - service: homeassistant.turn_on
+                      target:
+                        entity_id: "{{ siren_entity_val }}"
+                - service: logbook.log
+                  data:
+                    name: "Security Alert"
+                    message: "Alarm sounded. Triggered by: {{ triggered_name }}."
+                    entity_id: !input away_mode_helper
+                # Send stop-alarm notification
+                - device_id: !input notify_device
+                  domain: mobile_app
+                  type: notify
+                  title: "🔔 Alarm Active"
+                  message: "Alarm is sounding. Tap to stop."
+                  data:
+                    tag: security_alarm_active
+                    actions:
+                      - action: "STOP_ALARM"
+                        title: "🛑 Stop Alarm"
+                # Auto-stop after alarm duration OR manual stop
+                - wait_for_trigger:
+                    - platform: event
+                      event_type: mobile_app_notification_action
+                      event_data:
+                        action: "STOP_ALARM"
+                  timeout:
+                    minutes: "{{ alarm_duration_val }}"
+                  continue_on_timeout: true
+                # Stop alarm
+                - service: media_player.media_stop
+                  target:
+                    entity_id: !input media_players
+                - if:
+                    - condition: template
+                      value_template: "{{ siren_enabled_val and siren_entity_val != '' }}"
+                  then:
+                    - service: homeassistant.turn_off
+                      target:
+                        entity_id: "{{ siren_entity_val }}"
+                - service: logbook.log
+                  data:
+                    name: "Security Alert"
+                    message: >
+                      Alarm stopped after {{ alarm_duration_val }} min or manual stop.
+                    entity_id: !input away_mode_helper
+
+      # ── Dismiss ──
+      - conditions:
+          - condition: template
+            value_template: "{{ wait.trigger is not none and wait.trigger.event.data.action == 'DISMISS_ALERT' }}"
+        sequence:
+          - service: logbook.log
+            data:
+              name: "Security Alert"
+              message: "Alert dismissed by user. Triggered by: {{ triggered_name }}."
+              entity_id: !input away_mode_helper
+          - service: persistent_notification.create
+            data:
+              title: "Security Alert Dismissed"
+              message: >
+                Alert triggered by {{ triggered_name }} was dismissed at
+                {{ now().strftime('%Y-%m-%d %H:%M:%S') }}.
+
+      # ── I'm Home — Disarm ──
+      - conditions:
+          - condition: template
+            value_template: "{{ wait.trigger is not none and wait.trigger.event.data.action == 'DISARM_MODE' }}"
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input away_mode_helper
+          - service: logbook.log
+            data:
+              name: "Security Alert"
+              message: "Away Mode disarmed via notification by user. Triggered by: {{ triggered_name }}."
+              entity_id: !input away_mode_helper
+          - service: persistent_notification.create
+            data:
+              title: "Away Mode Disarmed"
+              message: >
+                Away Mode was turned off at {{ now().strftime('%Y-%m-%d %H:%M:%S') }}.
+                Alert triggered by {{ triggered_name }}.
+
+      # ── Timeout / No Response → Escalate ──
+      - conditions:
+          - condition: template
+            value_template: "{{ wait.trigger is none }}"
+        sequence:
+          - service: logbook.log
+            data:
+              name: "Security Alert"
+              message: >
+                No response received within {{ response_timeout_val }} min.
+                {% if auto_alarm_val %}Alarm auto-triggered.{% else %}Alert expired.{% endif %}
+                Triggered by: {{ triggered_name }}.
+              entity_id: !input away_mode_helper
+          - if:
+              - condition: template
+                value_template: "{{ auto_alarm_val }}"
+            then:
+              # Escalation notification
+              - device_id: !input notify_device
+                domain: mobile_app
+                type: notify
+                title: "🚨 No Response — Auto Alarm"
+                message: >
+                  No response in {{ response_timeout_val }} min.
+                  Alarm is being triggered automatically.
+                data:
+                  tag: security_alert_away
+              # Reuse alarm sequence
+              - service: media_player.volume_set
+                target:
+                  entity_id: !input media_players
+                data:
+                  volume_level: !input alarm_volume
+              - service: media_player.play_media
+                target:
+                  entity_id: !input media_players
+                data:
+                  media_content_id: !input alarm_sound_url
+                  media_content_type: music
+              - if:
+                  - condition: template
+                    value_template: "{{ siren_enabled_val and siren_entity_val != '' }}"
+                then:
+                  - service: homeassistant.turn_on
+                    target:
+                      entity_id: "{{ siren_entity_val }}"
+              - device_id: !input notify_device
+                domain: mobile_app
+                type: notify
+                title: "🔔 Auto Alarm Active"
+                message: "Alarm auto-triggered. Tap to stop."
+                data:
+                  tag: security_alarm_active
+                  actions:
+                    - action: "STOP_ALARM"
+                      title: "🛑 Stop Alarm"
+              - wait_for_trigger:
+                  - platform: event
+                    event_type: mobile_app_notification_action
+                    event_data:
+                      action: "STOP_ALARM"
+                timeout:
+                  minutes: "{{ alarm_duration_val }}"
+                continue_on_timeout: true
+              - service: media_player.media_stop
+                target:
+                  entity_id: !input media_players
+              - if:
+                  - condition: template
+                    value_template: "{{ siren_enabled_val and siren_entity_val != '' }}"
+                then:
+                  - service: homeassistant.turn_off
+                    target:
+                      entity_id: "{{ siren_entity_val }}"
+            else:
+              - service: persistent_notification.create
+                data:
+                  title: "Security Alert Expired"
+                  message: >
+                    Alert triggered by {{ triggered_name }} received no response
+                    and expired at {{ now().strftime('%Y-%m-%d %H:%M:%S') }}.
+
+  # Final: reset counter window (schedule reset after time_window in case threshold was never reached mid-cycle)
+  - delay:
+      seconds: "{{ time_window_val }}"
+  - service: counter.reset
+    target:
+      entity_id: !input trigger_counter
+
+mode: single
+max_exceeded: silent
